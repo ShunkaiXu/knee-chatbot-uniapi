@@ -14,22 +14,27 @@ exports.handler = async (event, context) => {
     // Parse the request body
     const { messages, system } = JSON.parse(event.body);
 
-    // Call UniAPI (which supports Claude and other models)
+    // Prepare messages in OpenAI format (required by UniAPI)
+    const formattedMessages = [
+      {
+        role: 'system',
+        content: system
+      },
+      ...messages
+    ];
+
+    console.log('Calling UniAPI...');
+
+    // Call UniAPI endpoint (OpenAI-compatible)
     const response = await fetch('https://api.uniapi.ai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.UNIAPI_API_KEY}` // API key stored securely in environment variables
+        'Authorization': `Bearer ${process.env.UNIAPI_API_KEY}`
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514', // UniAPI supports Claude models
-        messages: [
-          {
-            role: 'system',
-            content: system
-          },
-          ...messages
-        ],
+        model: 'gpt-4.1-2025-04-14',  // Using GPT model format for UniAPI
+        messages: formattedMessages,
         max_tokens: 1000,
         temperature: 0.7
       })
@@ -37,9 +42,26 @@ exports.handler = async (event, context) => {
 
     const data = await response.json();
     
-    console.log('UniAPI Response:', JSON.stringify(data));
+    console.log('UniAPI Response Status:', response.status);
+    console.log('UniAPI Response:', JSON.stringify(data).substring(0, 500));
 
-    // UniAPI uses OpenAI-compatible format
+    // Check for errors
+    if (!response.ok || data.error) {
+      console.error('API Error:', data);
+      return {
+        statusCode: response.status || 500,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+        body: JSON.stringify({ 
+          error: 'API Error',
+          details: data
+        })
+      };
+    }
+
+    // UniAPI returns OpenAI format: { choices: [{ message: { content: "..." } }] }
     // Convert to Anthropic format for our chatbot
     if (data.choices && data.choices[0] && data.choices[0].message) {
       const convertedResponse = {
@@ -52,6 +74,8 @@ exports.handler = async (event, context) => {
         role: 'assistant'
       };
 
+      console.log('Successfully converted response');
+
       return {
         statusCode: 200,
         headers: {
@@ -62,7 +86,6 @@ exports.handler = async (event, context) => {
         body: JSON.stringify(convertedResponse)
       };
     } else {
-      // Return error if response format is unexpected
       console.error('Unexpected response format:', data);
       return {
         statusCode: 500,
